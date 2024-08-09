@@ -1,17 +1,12 @@
 [project]
 name = "llm-groq"
-version = "0.5"
+version = "0.6"
 
 readme = "README.md"
-authors = [{name = "Moritz Angermann"}]
-license = {text = "Apache-2.0"}
-classifiers = [
-    "License :: OSI Approved :: Apache Software License"
-]
-dependencies = [
-    "llm",
-    "groq"
-]
+authors = [{ name = "Moritz Angermann" }]
+license = { text = "Apache-2.0" }
+classifiers = ["License :: OSI Approved :: Apache Software License"]
+dependencies = ["llm", "groq"]
 
 [project.urls]
 Homepage = "https://github.com/angerman/llm-groq"

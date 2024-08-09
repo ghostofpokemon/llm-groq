@@ -4,34 +4,39 @@ import llm
 from groq import Groq
 from pydantic import Field
 from typing import Optional, List, Union
+import requests
+import os
 
+def fetch_models():
+    url = "https://api.groq.com/openai/v1/models"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
+        "Content-Type": "application/json"
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()["data"]
+    else:
+        raise Exception(f"Failed to fetch models: {response.status_code}")
 
 @llm.hookimpl
 def register_models(register):
-    register(LLMGroq("groq-llama2"))
-    register(LLMGroq("groq-llama3"))
-    register(LLMGroq("groq-llama3-70b"))
-    register(LLMGroq("groq-llama3.1-8b"))
-    register(LLMGroq("groq-llama3.1-70b"))
-    register(LLMGroq("groq-llama3.1-405b"))
-    register(LLMGroq("groq-mixtral"))
-    register(LLMGroq("groq-gemma"))
-    register(LLMGroq("groq-gemma2"))
-
+    models = fetch_models()
+    for model in models:
+        register(LLMGroq(model["id"]))
 
 class LLMGroq(llm.Model):
     can_stream = True
 
     model_map: dict = {
-        "groq-gemma": "gemma-7b-it",
-        "groq-gemma2": "gemma2-9b-it",
-        "groq-llama2": "llama2-70b-4096",
-        "groq-llama3": "llama3-8b-8192",
-        "groq-llama3-70b": "llama3-70b-8192",
-        "groq-mixtral": "mixtral-8x7b-32768",
-        "groq-llama3.1-8b": "llama-3.1-8b-instant",
-        "groq-llama3.1-70b": "llama-3.1-70b-versatile",
-        "groq-llama3.1-405b": "llama-3.1-405b-reasoning",
+        "gemma2-9b-it": "groq-gemma2",
+        "gemma-7b-it": "groq-gemma",
+        "llama-3.1-70b-versatile": "groq-llama3.1-70b",
+        "llama-3.1-8b-instant": "groq-llama3.1-8b",
+        "llama3-70b-8192": "groq-llama3-70b",
+        "llama3-8b-8192": "groq-llama3",
+        "mixtral-8x7b-32768": "groq-mixtral",
+        # Add other mappings as needed
     }
 
     class Options(llm.Options):
@@ -115,7 +120,7 @@ class LLMGroq(llm.Model):
         client = Groq(api_key=key)
         resp = client.chat.completions.create(
             messages=messages,
-            model=self.model_map[self.model_id],
+            model=self.model_map.get(self.model_id, self.model_id),
             stream=stream,
             temperature=prompt.options.temperature,
             top_p=prompt.options.top_p,
