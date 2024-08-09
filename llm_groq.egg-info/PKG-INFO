@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: llm-groq
-Version: 0.5
+Version: 0.6
 Author: Moritz Angermann
 License: Apache-2.0
 Project-URL: Homepage, https://github.com/angerman/llm-groq

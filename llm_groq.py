@@ -1,11 +1,21 @@
-# [LLM](https://llm.datasette.io/) plugin providing access to [Groqcloud](http://console.groq.com) models.
-# Base off of llm-mistral (https://github.com/simonw/llm-mistral)
 import llm
 from groq import Groq
 from pydantic import Field
-from typing import Optional, List, Union
-import requests
+from typing import Optional, List, Union, Dict
+import httpx
 import os
+
+DEFAULT_ALIASES = {
+    "gemma-7b-it": "groq-gemma",
+    "gemma2-9b-it": "groq-gemma2",
+    "llama2-70b-4096": "groq-llama2",
+    "llama3-8b-8192": "groq-llama3",
+    "llama3-70b-8192": "groq-llama3-70b",
+    "mixtral-8x7b-32768": "groq-mixtral",
+    "llama-3.1-8b-instant": "groq-llama3.1-8b",
+    "llama-3.1-70b-versatile": "groq-llama3.1-70b",
+    "llama-3.1-405b-reasoning": "groq-llama3.1-405b",
+}
 
 def fetch_models():
     url = "https://api.groq.com/openai/v1/models"
@@ -13,79 +23,42 @@ def fetch_models():
         "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
         "Content-Type": "application/json"
     }
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return response.json()["data"]
-    else:
-        raise Exception(f"Failed to fetch models: {response.status_code}")
+    response = httpx.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()["data"]
 
 @llm.hookimpl
 def register_models(register):
+    for model_id in get_model_ids():
+        alias = DEFAULT_ALIASES.get(model_id)
+        aliases = [alias] if alias else []
+        if model_id == "whisper-large-v3":
+            register(LLMGroqWhisper(model_id), aliases=aliases)
+        else:
+            register(LLMGroq(model_id), aliases=aliases)
+
+def get_model_ids():
     models = fetch_models()
-    for model in models:
-        register(LLMGroq(model["id"]))
+    return [model["id"] for model in models]
 
 class LLMGroq(llm.Model):
     can_stream = True
 
-    model_map: dict = {
-        "gemma2-9b-it": "groq-gemma2",
-        "gemma-7b-it": "groq-gemma",
-        "llama-3.1-70b-versatile": "groq-llama3.1-70b",
-        "llama-3.1-8b-instant": "groq-llama3.1-8b",
-        "llama3-70b-8192": "groq-llama3-70b",
-        "llama3-8b-8192": "groq-llama3",
-        "mixtral-8x7b-32768": "groq-mixtral",
-        # Add other mappings as needed
-    }
-
     class Options(llm.Options):
-        temperature: Optional[float] = Field(
-            description=(
-                "Controls randomness of responses. A lower temperature leads to"
-                "more predictable outputs while a higher temperature results in"
-                "more varies and sometimes more creative outputs."
-                "As the temperature approaches zero, the model will become deterministic"
-                "and repetitive."
-            ),
-            ge=0,
-            le=1,
-            default=None,
-        )
-        top_p: Optional[float] = Field(
-            description=(
-                "Controls randomness of responses. A lower temperature leads to"
-                "more predictable outputs while a higher temperature results in"
-                "more varies and sometimes more creative outputs."
-                "0.5 means half of all likelihood-weighted options are considered."
-            ),
-            ge=0,
-            le=1,
-            default=None,
-        )
-        max_tokens: Optional[int] = Field(
-            description=(
-                "The maximum number of tokens that the model can process in a"
-                "single response. This limits ensures computational efficiency"
-                "and resource management."
-                "Requests can use up to 2048 tokens shared between prompt and completion."
-            ),
-            ge=0,
-            lt=2049,
-            default=None,
-        )
-        stop: Optional[Union[str, List[str]]] = Field(
-            description=(
-                "A stop sequence is a predefined or user-specified text string that"
-                "signals an AI to stop generating content, ensuring its responses"
-                "remain focused and concise. Examples include punctuation marks and"
-                'markers like "[end]".'
-                'For this example, we will use ", 6" so that the llm stops counting at 5.'
-                "If multiple stop values are needed, an array of string may be passed,"
-                'stop=[", 6", ", six", ", Six"]'
-            ),
-            default=None,
-        )
+        temperature: Optional[float] = Field(default=1)
+        top_p: Optional[float] = Field(default=1)
+        max_tokens: Optional[int] = Field(default=None)
+        stop: Optional[Union[str, List[str]]] = Field(default=None)
+        frequency_penalty: Optional[float] = Field(default=0)
+        presence_penalty: Optional[float] = Field(default=0)
+        logit_bias: Optional[Dict[str, float]] = Field(default=None)
+        user: Optional[str] = Field(default=None)
+        seed: Optional[int] = Field(default=None)
+        response_format: Optional[Dict[str, str]] = Field(default=None)
+        stream: Optional[bool] = Field(default=False)
+        tool_choice: Optional[Union[str, Dict[str, str]]] = Field(default=None)
+        tools: Optional[List[Dict[str, Union[str, Dict[str, str]]]]] = Field(default=None)
+        parallel_tool_calls: Optional[bool] = Field(default=True)
 
     def __init__(self, model_id):
         self.model_id = model_id
@@ -118,18 +91,59 @@ class LLMGroq(llm.Model):
         key = llm.get_key("", "groq", "LLM_GROQ_KEY")
         messages = self.build_messages(prompt, conversation)
         client = Groq(api_key=key)
-        resp = client.chat.completions.create(
-            messages=messages,
-            model=self.model_map.get(self.model_id, self.model_id),
-            stream=stream,
-            temperature=prompt.options.temperature,
-            top_p=prompt.options.top_p,
-            max_tokens=prompt.options.max_tokens,
-            stop=prompt.options.stop,
-        )
+
+        # Prepare the request body
+        body = {
+            "messages": messages,
+            "model": self.model_id,
+            "stream": stream,
+            "temperature": prompt.options.temperature,
+            "top_p": prompt.options.top_p,
+            "max_tokens": prompt.options.max_tokens,
+            "stop": prompt.options.stop,
+            "frequency_penalty": prompt.options.frequency_penalty,
+            "presence_penalty": prompt.options.presence_penalty,
+            "logit_bias": prompt.options.logit_bias,
+            "user": prompt.options.user,
+            "seed": prompt.options.seed,
+            "response_format": prompt.options.response_format,
+            "tools": prompt.options.tools,
+            "parallel_tool_calls": prompt.options.parallel_tool_calls,
+        }
+
+        # Only include tool_choice if it has a valid value
+        if prompt.options.tool_choice is not None:
+            body["tool_choice"] = prompt.options.tool_choice
+
+        resp = client.chat.completions.create(**body)
+
         if stream:
             for chunk in resp:
                 if chunk.choices[0].delta.content:
                     yield from chunk.choices[0].delta.content
         else:
             yield from resp.choices[0].message.content
+
+class LLMGroqWhisper(llm.Model):
+    can_stream = False
+
+    class Options(llm.Options):
+        prompt: Optional[str] = Field(default=None)
+        response_format: Optional[str] = Field(default="json")
+        temperature: Optional[float] = Field(default=0, ge=0, le=1)
+        language: Optional[str] = Field(default=None)
+
+    def __init__(self, model_id):
+        self.model_id = model_id
+
+    def execute(self, prompt, stream, response, conversation):
+        key = llm.get_key("", "groq", "LLM_GROQ_KEY")
+        client = Groq(api_key=key)
+        resp = client.transcribe.create(
+            model=self.model_id,
+            prompt=prompt.options.prompt,
+            response_format=prompt.options.response_format,
+            temperature=prompt.options.temperature,
+            language=prompt.options.language,
+        )
+        yield resp.text
