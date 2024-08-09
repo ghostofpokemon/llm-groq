@@ -4,6 +4,7 @@ from pydantic import Field
 from typing import Optional, List, Union, Dict
 import httpx
 import os
+import json
 
 DEFAULT_ALIASES = {
     "gemma-7b-it": "groq-gemma",
@@ -53,8 +54,8 @@ class LLMGroq(llm.Model):
         presence_penalty: Optional[float] = Field(default=0)
         user: Optional[str] = Field(default=None)
         seed: Optional[int] = Field(default=None)
-        response_format: Optional[Dict[str, str]] = Field(default=None)
-        stream: Optional[bool] = Field(default=False)
+        response_format: Optional[str] = Field(default=None)
+        stream: Optional[bool] = Field(default=True)
         tool_choice: Optional[Union[str, Dict[str, str]]] = Field(default=None)
         tools: Optional[List[Dict[str, Union[str, Dict[str, str]]]]] = Field(default=None)
         parallel_tool_calls: Optional[bool] = Field(default=True)
@@ -91,11 +92,27 @@ class LLMGroq(llm.Model):
         messages = self.build_messages(prompt, conversation)
         client = Groq(api_key=key)
 
+        # Ensure the prompt includes instructions for generating JSON
+        if prompt.options.response_format == "json":
+            json_instruction = "Please provide the response in JSON format."
+            if not any(msg["content"] == json_instruction for msg in messages):
+                messages.append({"role": "user", "content": json_instruction})
+
+        # Convert response_format string to dictionary if necessary
+        response_format_dict = None
+        if prompt.options.response_format:
+            if prompt.options.response_format == "json":
+                response_format_dict = {"type": "json_object"}
+            elif prompt.options.response_format == "verbose_json":
+                response_format_dict = {"type": "verbose_json"}
+            else:
+                raise ValueError("Invalid response_format value")
+
         # Prepare the request body
         body = {
             "messages": messages,
             "model": self.model_id,
-            "stream": stream,
+            "stream": stream if not response_format_dict else False,
             "temperature": prompt.options.temperature,
             "top_p": prompt.options.top_p,
             "max_tokens": prompt.options.max_tokens,
@@ -104,7 +121,7 @@ class LLMGroq(llm.Model):
             "presence_penalty": prompt.options.presence_penalty,
             "user": prompt.options.user,
             "seed": prompt.options.seed,
-            "response_format": prompt.options.response_format,
+            "response_format": response_format_dict,
             "tools": prompt.options.tools,
             "parallel_tool_calls": prompt.options.parallel_tool_calls,
         }
@@ -115,12 +132,14 @@ class LLMGroq(llm.Model):
 
         resp = client.chat.completions.create(**body)
 
-        if stream:
+        if stream and not response_format_dict:
             for chunk in resp:
                 if chunk.choices[0].delta.content:
                     yield from chunk.choices[0].delta.content
         else:
-            yield from resp.choices[0].message.content
+            # Handle JSON response
+            json_response = json.loads(resp.choices[0].message.content)
+            yield json.dumps(json_response, indent=2)  # Convert JSON to string with indentation
 
 class LLMGroqWhisper(llm.Model):
     can_stream = False
