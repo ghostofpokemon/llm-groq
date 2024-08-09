@@ -51,7 +51,6 @@ class LLMGroq(llm.Model):
         stop: Optional[Union[str, List[str]]] = Field(default=None)
         frequency_penalty: Optional[float] = Field(default=0)
         presence_penalty: Optional[float] = Field(default=0)
-        logit_bias: Optional[Dict[str, float]] = Field(default=None)
         user: Optional[str] = Field(default=None)
         seed: Optional[int] = Field(default=None)
         response_format: Optional[Dict[str, str]] = Field(default=None)
@@ -103,7 +102,6 @@ class LLMGroq(llm.Model):
             "stop": prompt.options.stop,
             "frequency_penalty": prompt.options.frequency_penalty,
             "presence_penalty": prompt.options.presence_penalty,
-            "logit_bias": prompt.options.logit_bias,
             "user": prompt.options.user,
             "seed": prompt.options.seed,
             "response_format": prompt.options.response_format,
