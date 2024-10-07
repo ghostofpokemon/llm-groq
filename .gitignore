@@ -1,0 +1,43 @@
+# General
+.DS_Store
+*.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyc
+*.egg-info
+*.egg
+*.log
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Virtual environment
+venv/
+*.venv/
+
+# IDE and editor files
+*.swp
+*.swo
+*.swn
+*.bak
+*.tmp
+*.log
+*.sublime-project
+*.sublime-workspace
+*.idea
+*.pydevproject
+*.vscode/
+*.ipynb_checkpoints/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Miscellaneous
+*.lock
+*.iml
